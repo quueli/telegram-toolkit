@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{ meta.task_name or "Discovery report" }}</title>
+<style>
+:root{--bg:#f6f9fc;--surface:#fff;--text:#0f172a;--muted:#64748b;--line:#e5ecf4;--accent:#2563eb}
+[data-theme="dark"]{--bg:#0b1320;--surface:#0f172a;--text:#e7eef7;--muted:#9bb1c7;--line:#1c2a3d;--accent:#5b9dff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Segoe UI,Arial,sans-serif}
+.wrap{max-width:1100px;margin:24px auto;padding:0 16px}
+header{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+h1{font-size:19px;margin:0;flex:1}
+.muted{color:var(--muted);font-size:13px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.tabs{display:flex;gap:6px}
+.tab{padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer;font-size:13px}
+.tab.active{background:var(--accent);color:#fff;border-color:transparent}
+input,select,button{padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--text);font-size:13px}
+button{cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--surface)}
+.card .title{font-weight:600;margin-bottom:4px;word-break:break-word}
+.card .sub{color:var(--muted);font-size:12px;margin-bottom:8px}
+.card .metrics{display:flex;flex-wrap:wrap;gap:6px;font-size:12px}
+.pill{border:1px dashed var(--line);border-radius:999px;padding:3px 8px}
+.card a{color:var(--accent);font-size:12px;word-break:break-all}
+footer{margin-top:16px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>{{ meta.task_name or "Discovery report" }}</h1>
+    <span class="muted">{{ meta.generated_at|format_date }}</span>
+    <button id="theme-toggle">theme</button>
+  </header>
+  <div class="muted" style="margin-bottom:10px">
+    {{ items|length }} results
+    &middot; {{ items|selectattr("type", "equalto", "channel")|list|length }} channels
+    &middot; {{ items|selectattr("type", "equalto", "group")|list|length }} groups
+  </div>
+
+  <div class="toolbar">
+    <div class="tabs">
+      <div class="tab active" data-tab="all">all</div>
+      <div class="tab" data-tab="channel">channels</div>
+      <div class="tab" data-tab="group">groups</div>
+    </div>
+    <input id="search" type="text" placeholder="search title or @username" />
+    <select id="sort">
+      <option value="subscribers">sort: subscribers</option>
+      <option value="avg_views">sort: avg views</option>
+      <option value="er">sort: engagement</option>
+      <option value="title">sort: title</option>
+    </select>
+  </div>
+
+  <div class="grid" id="grid">
+    {% for item in items %}
+    <div class="card"
+         data-type="{{ item.type }}"
+         data-title="{{ (item.title or "")|lower }}"
+         data-username="{{ (item.username or "")|lower }}"
+         data-subscribers="{{ item.subscribers or 0 }}"
+         data-avg_views="{{ item.avg_views or 0 }}"
+         data-er="{{ item.er or 0 }}">
+      <div class="title">{{ item.title or "(untitled)" }}</div>
+      <div class="sub">{{ "@" + item.username if item.username else "no username" }} &middot; {{ "public" if item.is_public else "private" }}</div>
+      <div class="metrics">
+        <span class="pill">subs: {{ item.subscribers|format_int if item.subscribers is not none else "-" }}</span>
+        <span class="pill">avg views: {{ item.avg_views|format_num if item.avg_views is not none else "-" }}</span>
+        <span class="pill">ER: {{ (item.er|float|round(2))|string + "%" if item.er is not none else "-" }}</span>
+        <span class="pill">{{ item.locale|upper if item.locale else "-" }}</span>
+      </div>
+      {% if item.description %}<div class="sub" style="margin-top:6px">{{ item.description }}</div>{% endif %}
+      <div style="margin-top:8px"><a href="{{ item.link }}" target="_blank" rel="noreferrer">{{ item.link }}</a></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <footer>generated {{ meta.generated_at|format_date }}</footer>
+</div>
+<script>
+(function () {
+  function safeStorage() {
+    try {
+      localStorage.setItem("__t", "1");
+      localStorage.removeItem("__t");
+      return localStorage;
+    } catch (e) {
+      return { getItem: function () { return null; }, setItem: function () {} };
+    }
+  }
+  var storage = safeStorage();
+  var THEME_KEY = "toolkit-theme";
+  document.documentElement.setAttribute("data-theme", storage.getItem(THEME_KEY) || "light");
+  document.getElementById("theme-toggle").addEventListener("click", function () {
+    var next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    storage.setItem(THEME_KEY, next);
+  });
+
+  var state = { tab: "all", query: "", sort: "subscribers" };
+  var cards = Array.prototype.slice.call(document.querySelectorAll(".card"));
+
+  function render() {
+    var q = state.query.trim().toLowerCase();
+    cards.forEach(function (card) {
+      var matchesTab = state.tab === "all" || card.dataset.type === state.tab;
+      var matchesQuery = !q || card.dataset.title.indexOf(q) !== -1 || card.dataset.username.indexOf(q) !== -1;
+      card.style.display = matchesTab && matchesQuery ? "" : "none";
+    });
+    var grid = document.getElementById("grid");
+    cards
+      .slice()
+      .sort(function (a, b) { return Number(b.dataset[state.sort]) - Number(a.dataset[state.sort]); })
+      .forEach(function (card) { grid.appendChild(card); });
+  }
+
+  document.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("active"); });
+      tab.classList.add("active");
+      state.tab = tab.dataset.tab;
+      render();
+    });
+  });
+  document.getElementById("search").addEventListener("input", function (e) {
+    state.query = e.target.value;
+    render();
+  });
+  document.getElementById("sort").addEventListener("change", function (e) {
+    state.sort = e.target.value;
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
